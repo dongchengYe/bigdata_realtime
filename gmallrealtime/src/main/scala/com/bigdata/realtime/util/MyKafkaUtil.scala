@@ -3,8 +3,7 @@ package com.bigdata.realtime.util
 import java.lang
 import java.util.Properties
 
-import com.sun.scenario.effect.Offset
-import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRecord}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.streaming.StreamingContext
@@ -18,26 +17,26 @@ object MyKafkaUtil {
   val kafkaBrokerList: String = properties.getProperty("kafka.broker.list")
 
   var kafkaParam  = collection.mutable.Map(
-    "bootstrap.servers" -> kafkaBrokerList,
-    "key.deserializer" -> classOf[StringDeserializer],
-    "value.deserializer" -> classOf[StringDeserializer],
-    "group.id" -> "realtime_group",
-    "auto.offset.reset" -> "latest",
-    "enable.auto.commit" -> (false:lang.Boolean)
+    ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG -> kafkaBrokerList,
+    ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG -> classOf[StringDeserializer],
+    ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG -> classOf[StringDeserializer],
+    ConsumerConfig.GROUP_ID_CONFIG -> "realtime_group",
+    ConsumerConfig.AUTO_OFFSET_RESET_CONFIG -> "latest",
+    ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG -> (false:lang.Boolean)
   )
 
   def getKafkaStream(topic:String, ssc : StreamingContext) : InputDStream[ConsumerRecord[String,String]] = {
     val inputDs: InputDStream[ConsumerRecord[String, String]] = KafkaUtils.createDirectStream[String, String](
       ssc,
-      LocationStrategies.PreferConsistent,
-      ConsumerStrategies.Subscribe[String, String](Array(topic), kafkaParam)
+      LocationStrategies.PreferConsistent,/*位置策略*/
+      ConsumerStrategies.Subscribe[String, String](Array(topic), kafkaParam)/*消费策略*/
     )
     inputDs
   }
 
   def getKafkaSream(topic : String, ssc : StreamingContext, offsets: Map[TopicPartition,Long],groupId: String) : InputDStream[ConsumerRecord[String,String]] = {
 
-    kafkaParam("group.id") = groupId
+    kafkaParam(ConsumerConfig.GROUP_ID_CONFIG) = groupId
 
     val kafaDStream: InputDStream[ConsumerRecord[String, String]] = KafkaUtils.createDirectStream[String, String](
       ssc,
