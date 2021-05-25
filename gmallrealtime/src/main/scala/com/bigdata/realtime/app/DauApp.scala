@@ -5,7 +5,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 import com.alibaba.fastjson.{JSON, JSONObject}
-import com.bigdata.realtime.util.{MyKafkaUtil, MyRedisUtil}
+import com.bigdata.realtime.bean.DauInfo
+import com.bigdata.realtime.util.{MyEsUtil, MyKafkaUtil, MyRedisUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
@@ -44,6 +45,8 @@ object DauApp {
 
         jSONObject
     }
+
+    //利用Redis进行去重
     val filteredDStream: DStream[JSONObject] = jsonRecordDstream.mapPartitions {
 
       jsonRecordItr =>
@@ -67,9 +70,36 @@ object DauApp {
         jedis.close()
         listBuffer.toIterator
     }
+
     filteredDStream.count().print()
 
-    //保存到ES
+//    保存到ES
+    filteredDStream.foreachRDD{
+          jsonIter => {
+            val dauList: List[DauInfo] = jsonIter.map {
+                jsonObj => {
+                  val commonJsonObj: JSONObject = jsonObj.getJSONObject("common")
+                  DauInfo(
+                    commonJsonObj.getString("mid"),
+                    commonJsonObj.getString("uid"),
+                    commonJsonObj.getString("ar"),
+                    commonJsonObj.getString("ch"),
+                    commonJsonObj.getString("vc"),
+                    jsonObj.getString("dt"),
+                    jsonObj.getString("hr"),
+                    "00",
+                    jsonObj.getLong("ts")
+                  )
+                }
+               }.toLocalIterator.toList
+
+
+            val date: String = new SimpleDateFormat("yyyy-MM-dd").format(new Date())
+            MyEsUtil.bulkInsert(dauList,"gmall_dau_info_"+date)
+
+      }
+    }
+
     ssc.start()
     ssc.awaitTermination()
   }

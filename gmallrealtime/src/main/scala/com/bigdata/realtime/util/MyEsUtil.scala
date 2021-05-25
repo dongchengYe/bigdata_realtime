@@ -1,8 +1,13 @@
 package com.bigdata.realtime.util
 
+import java.util
+
+import com.bigdata.realtime.bean.DauInfo
 import io.searchbox.client.config.HttpClientConfig
 import io.searchbox.client.{JestClient, JestClientFactory}
 import io.searchbox.core.{Bulk, BulkResult, Index}
+
+import scala.collection.mutable.ListBuffer
 
 object MyEsUtil {
 
@@ -56,4 +61,13 @@ object MyEsUtil {
 
   }
 
+
+  def main(args: Array[String]): Unit = {
+    val daoInfo = DauInfo("zhangsan","lisi","lisi","lisi","lisi","lisi","lisi","ll",1L)
+
+    val infoes = new ListBuffer[DauInfo]()
+    infoes+=daoInfo
+
+    bulkInsert(infoes.toList,"index_test")
+  }
 }
