@@ -1,14 +1,17 @@
 package com.bigdata.realtime.app
 
+import java.lang
 import java.text.SimpleDateFormat
 import java.util.Date
 
-import com.alibaba.fastjson.JSON
-import com.bigdata.realtime.util.MyKafkaUtil
+import com.alibaba.fastjson.{JSON, JSONObject}
+import com.bigdata.realtime.util.{MyKafkaUtil, MyRedisUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.spark.SparkConf
-import org.apache.spark.streaming.dstream.InputDStream
+import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
+
+import scala.collection.mutable.ListBuffer
 
 /**
  * 日活统计
@@ -41,13 +44,34 @@ object DauApp {
 
         jSONObject
     }
-    jsonRecordDstream.print(1000)
+    val filteredDStream: DStream[JSONObject] = jsonRecordDstream.mapPartitions {
 
+      jsonRecordItr =>
+        //获取Redis客户端
+        val jedis = MyRedisUtil.getJedisClient
 
+        println(jedis.ping())
+        //定义当前分区过滤后的数据用于返回
+        val listBuffer = new ListBuffer[JSONObject]
+        //遍历分区中的数据进行过滤
+        for (jsonRecord <- jsonRecordItr) {
+          val dt: String = jsonRecord.getString("dt")
+          val mid: String = jsonRecord.getJSONObject("common").getString("mid")
+          val dauKey: String = "dau:" + dt
+          val isNew: lang.Long = jedis.sadd(dauKey, mid)
+          jedis.expire(dauKey, 24 * 3600)
+          if (isNew == 1L) {
+            listBuffer.append(jsonRecord)
+          }
+        }
+        jedis.close()
+        listBuffer.toIterator
+    }
+    filteredDStream.count().print()
+
+    //保存到ES
     ssc.start()
     ssc.awaitTermination()
   }
-
-
 
 }
