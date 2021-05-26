@@ -6,11 +6,14 @@ import java.util.Date
 
 import com.alibaba.fastjson.{JSON, JSONObject}
 import com.bigdata.realtime.bean.DauInfo
-import com.bigdata.realtime.util.{MyEsUtil, MyKafkaUtil, MyRedisUtil}
+import com.bigdata.realtime.util.{MyEsUtil, MyKafkaUtil, MyRedisUtil, OffsetManagerUtil}
 import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.apache.kafka.common.TopicPartition
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
+import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.spark.streaming.{Seconds, StreamingContext}
+import redis.clients.jedis.Jedis
 
 import scala.collection.mutable.ListBuffer
 
@@ -31,8 +34,29 @@ object DauApp {
     val groupId = "gmall_realtime"
     val topic = "gmall_start"
 
-    val recordDstream: InputDStream[ConsumerRecord[String, String]] = MyKafkaUtil.getKafkaStream(topic, ssc,groupId)
-    val jsonRecordDstream = recordDstream.map {
+    //获取Redis中的offset
+    val offsetMap: Map[TopicPartition, Long] = OffsetManagerUtil.getOffset(topic,groupId)
+    var recordDstream: InputDStream[ConsumerRecord[String, String]] = null
+
+    if(offsetMap!=null && !offsetMap.isEmpty){
+      recordDstream = MyKafkaUtil.getKafkaStream(topic,ssc,offsetMap,groupId)
+    }else{
+      recordDstream = MyKafkaUtil.getKafkaStream(topic, ssc,groupId)
+    }
+
+
+    //得到本批次处理数据中对应分区的偏移量起始位置和结束位置
+
+    var offsetRanges: Array[OffsetRange] = Array.empty[OffsetRange]
+    val offsetDStream: DStream[ConsumerRecord[String, String]] = recordDstream.transform {
+      rdd => {
+        offsetRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
+        println(offsetRanges(0).untilOffset+"********")
+        rdd
+      }
+    }
+
+    val jsonRecordDstream = offsetDStream.map {
       record =>
         val value = record.value()
         val jSONObject = JSON.parseObject(value)
@@ -71,10 +95,10 @@ object DauApp {
         listBuffer.toIterator
     }
 
-    filteredDStream.count().print()
-
 //    保存到ES
     filteredDStream.foreachRDD{
+      rdd=>{
+        rdd.foreachPartition{
           jsonIter => {
             val dauList: List[DauInfo] = jsonIter.map {
                 jsonObj => {
@@ -91,12 +115,14 @@ object DauApp {
                     jsonObj.getLong("ts")
                   )
                 }
-               }.toLocalIterator.toList
-
+               }.toList
 
             val date: String = new SimpleDateFormat("yyyy-MM-dd").format(new Date())
             MyEsUtil.bulkInsert(dauList,"gmall_dau_info_"+date)
-
+            }
+        }
+        //保存偏移量
+        OffsetManagerUtil.saveOffset(topic,groupId,offsetRanges)
       }
     }
 
